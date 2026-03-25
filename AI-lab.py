@@ -1,10 +1,15 @@
 #AI-lab 开发者：浪兮（hhu2524030232张锐寒）
 
 """
-    【开发者注】
+    【AI-lab】
+    Learning codes, implementations and notes for NLP, CV
+    and cutting-edge artificial intelligence technologies.
+    面向NLP、CV与前沿AI技术的学习代码、算法复现及笔记整理
 
+    https://github.com/spinner-bot/AI-lab
 """
 
+is_debugging=0
 
 import re
 import time
@@ -13,12 +18,7 @@ import random
 import math
 import numpy as np
 from datetime import datetime
-
-
-"""
-    【日志记录模块】 2026.3.17 浪兮（hhu2524030232张锐寒）
-"""
-
+from collections import Counter
 
 #日志文件
 log_file_name = ""
@@ -53,12 +53,6 @@ def log(text,newline=True,log_only=False,console_only=False):
 def i_log(text,newline=True,prefix=True):
     log(("[input输入]" if prefix else "")+text,newline,1)
     return text
-
-
-"""
-    【文本处理模块】  2026.3.17 浪兮（hhu2524030232张锐寒）
-"""
-
 
 #数字判断器
 def is_number(word):
@@ -167,12 +161,6 @@ def read_list_import():
         else:
             read_list.append(temp + ".txt")
     log(f"成功导入{len(read_list)}个文本文件到阅读列表:{read_list}",2)
-
-
-"""
-    【词库管理模块】  2026.3.17 浪兮（hhu2524030232张锐寒）
-"""
-
 
 #词库
 token={}
@@ -618,19 +606,45 @@ def base_NLP():
         case 0:
             return -2
         case 1:
-            match menu2("词库管理", "skill", "返回主页","词库统计","词库显示","词库整理","词库导出","词库测试"):
-                case 0:
-                    return -2
-                case 1:
-                    pass
-                case 2:
-                    pass
-                case 3:
-                    pass
-                case 4:
-                    pass
-                case 5:
-                    pass
+            global core_vocab
+            if has_legacy_vocab_data():
+                log("检测到旧版词表存有数据，正在自动迁移……")
+                core_vocab.merge_legacy_vocab()
+                log("全部数据已经迁移至主词表。正在清理旧版词表……")
+                clear_legacy_vocab()
+                log("清理完成。词库管理系统现在可以被正常使用！")
+            while True:
+                match menu2("词库管理", "skill", "返回主页","词库统计","词库显示","词库搜索","词库导出"):
+                    case 0:
+                        return -2
+                    case 1:
+                        core_vocab.stats()
+                    case 2:
+                        core_vocab.show_vocab()
+                    case 3:
+                        log("欢迎使用搜索————")
+                        log("输入搜索词：", False)
+                        for_searching=i_log(input())
+
+                        log("确定模糊度：", False)
+                        f=i_log(input())
+                        try:
+                            f=float(f)
+                            if(f<0 or f>1):
+                                log("输入不正确，将使用default值0.5")
+                                f = 0.5
+                        except:
+                            log("输入不合法，将使用default值0.5")
+                            f=0.5
+
+                        core_vocab.search(for_searching,f).show_vocab(True)
+                    case 4:
+                        core_vocab.export(f"词表 {core_vocab.name} {get_time()}")
+                    case 5:
+                        pass
+                    case 6:
+                        pass
+                log('')
 
 #基本功能
 def base_CV():
@@ -676,6 +690,659 @@ def mainpage_CV():
             case 1:
                 base_CV()
 
-#流程控制
-homepage()
+# 词表封装
+class Vocab:
+    def __init__(self, name, parent_vocab=None, keep_words: tuple = None):
+        self.name = name
 
+        # 有效分区
+        self.word2idx = {}
+        self.word2vec = {}
+        self.word2count = {}
+
+        # 无效分区
+        self.u_word2idx = {}
+        self.u_word2vec = {}
+        self.u_word2count = {}
+
+        # 分表逻辑
+        if parent_vocab is not None and keep_words is not None:
+            # 遍历保留词元组，只筛选需要的词
+            for word in keep_words:
+                # 仅当词存在于父词表时，才加入子词表
+                if word in parent_vocab.word2idx:
+                    self.word2idx[word] = parent_vocab.word2idx[word]
+                    self.word2vec[word] = parent_vocab.word2vec[word]
+                    self.word2count[word] = parent_vocab.word2count[word]
+
+                if word in parent_vocab.u_word2idx:
+                    self.u_word2idx[word] = parent_vocab.u_word2idx[word]
+                    self.u_word2vec[word] = parent_vocab.u_word2vec[word]
+                    self.u_word2count[word] = parent_vocab.u_word2count[word]
+
+    # 1.添加词
+    def add(self, word, idx, vec, count,available=True):
+        if available:
+            self.word2idx[word] = idx
+            self.word2vec[word] = vec
+            self.word2count[word] = count
+        else:
+            self.u_word2idx[word] = idx
+            self.u_word2vec[word] = vec
+            self.u_word2count[word] = count
+        return idx
+
+    # 2.注销词
+    def unavailable(self, word):
+        if word in self.word2idx:
+            self.u_word2idx[word] = self.word2idx.pop(word)
+            self.u_word2vec[word] = self.word2vec.pop(word)
+            self.u_word2count[word] = self.word2count.pop(word)
+
+    # 3.使生效
+    def available(self, word):
+        if word in self.u_word2idx:
+            self.word2idx[word] = self.u_word2idx.pop(word)
+            self.word2vec[word] = self.u_word2vec.pop(word)
+            self.word2count[word] = self.u_word2count.pop(word)
+
+    # 4.词索引
+    def get_idx(self, word, available_only=True):
+        if available_only:
+            return self.word2idx.get(word, None)
+        return self.word2idx.get(word, self.u_word2idx.get(word, None))
+
+    # 5.词向量
+    def get_vec(self, word, available_only=True):
+        if available_only:
+            return self.word2vec.get(word, None)
+        return self.word2vec.get(word, self.u_word2vec.get(word, None))
+
+    # 6.词频数
+    def get_count(self, word, available_only=True):
+        if available_only:
+            return self.word2count.get(word, 0)
+        return self.word2count.get(word, self.u_word2count.get(word, 0))
+
+    # 7.词状态
+    def get_state(self, word, available_only=True):
+        if available_only:
+            return word in self.word2idx
+        return word in self.word2idx or word in self.u_word2idx
+
+    # 8.随机取词
+    def random_select(self,amount,unavailable_after_select=False):
+        words = list(self.word2idx.keys())
+        if not words:
+            return []
+        selected = random.sample(words, k=min(amount, len(words)))
+
+        if unavailable_after_select:
+            for w in selected:
+                self.unavailable(w)
+        return selected
+
+    # 9.加权取词
+    def weight_select(self,amount,weight=1,unavailable_after_select=False):
+        words = list(self.word2idx.keys())
+        if not words:
+            return []
+
+        weights = []
+        if isinstance(weight, dict):
+            weights = [weight.get(w, 1) for w in words]
+        else:
+            weights = [self.word2count[w] ** float(weight) for w in words]
+
+        selected = random.choices(words, weights=weights, k=min(amount, len(words)))
+
+        if unavailable_after_select:
+            for w in selected:
+                self.unavailable(w)
+        return selected
+
+    # 10.余弦相似度
+    def similarity(self, word1, word2):
+        # 获取两个词的向量
+        vec1 = self.get_vec(word1, available_only)
+        vec2 = self.get_vec(word2, available_only)
+
+        # 异常处理
+        if vec1 is None or vec2 is None:
+            return 0.0
+
+        if vec1.shape != vec2.shape:
+            return 0.0
+
+        # 计算
+        dot_product = np.dot(vec1, vec2)
+        norm1 = np.linalg.norm(vec1)
+        norm2 = np.linalg.norm(vec2)
+
+        # 避免除零错误
+        if norm1 == 0 or norm2 == 0:
+            return 0.0
+
+        #返回值
+        return dot_product / (norm1 * norm2)
+
+    # 11.维度清洗
+    def dim_clean(self, dim=0):
+        # 1. 收集全量词汇（有效 + 无效，全覆盖扫描）
+        all_words = list(self.word2idx.keys()) + list(self.u_word2idx.keys())
+        if not all_words:
+            # 空表直接返回空临时表
+            temp_vocab = Vocab(name=f"{self.name}_d_empty")
+            return temp_vocab
+
+        # 2. 统计所有词的向量维度 → dim=0时自动选众数
+        dim_list = []
+        for word in all_words:
+            vec = self.get_vec(word, available_only=False)
+            if vec is not None:
+                dim_list.append(vec.shape[0])  # 取向量的维度值
+
+        # 自动选择数量最多的维度
+        if dim == 0 and dim_list:
+            dim = Counter(dim_list).most_common(1)[0][0]
+        elif dim == 0:
+            dim = 0  # 无向量，默认0维
+
+        # 3. 创建临时表（动态命名：原表名_d目标维度 → 递归兼容、无固定名）
+        temp_vocab = Vocab(name=f"{self.name}_d{dim}exc")
+
+        # 4. 分离词汇：目标维度留在原表，非目标移入临时表
+        # 处理【有效词】分区
+        for word in list(self.word2idx.keys()):
+            vec = self.word2vec[word]
+            if vec.shape[0] != dim:
+                # 移入临时表（保持有效状态）
+                temp_vocab.add(
+                    word=word,
+                    idx=self.word2idx[word],
+                    vec=self.word2vec[word],
+                    count=self.word2count[word],
+                    available=True
+                )
+                # 从原表删除
+                self.word2idx.pop(word)
+                self.word2vec.pop(word)
+                self.word2count.pop(word)
+
+        # 处理【无效词】分区
+        for word in list(self.u_word2idx.keys()):
+            vec = self.u_word2vec[word]
+            if vec.shape[0] != dim:
+                # 移入临时表（保持无效状态）
+                temp_vocab.add(
+                    word=word,
+                    idx=self.u_word2idx[word],
+                    vec=self.u_word2vec[word],
+                    count=self.u_word2count[word],
+                    available=False
+                )
+                # 从原表删除
+                self.u_word2idx.pop(word)
+                self.u_word2vec.pop(word)
+                self.u_word2count.pop(word)
+
+        # 5. 打印日志（可选，方便调试）
+        log(f"维度清洗完成 | 原表：{self.name} | 保留维度：{dim} | 分离词数：{len(temp_vocab.word2idx) + len(temp_vocab.u_word2idx)}")
+        log(f"临时表名称：{temp_vocab.name}")
+
+        # 6. 返回分离出的临时表实例
+        return temp_vocab
+
+    # 12.清空词表
+    def clear(self):
+        # 清空有效分区
+        self.word2idx.clear()
+        self.word2vec.clear()
+        self.word2count.clear()
+        # 清空无效分区
+        self.u_word2idx.clear()
+        self.u_word2vec.clear()
+        self.u_word2count.clear()
+
+    # 13.从文件导入
+    def import_from_file(self, filename, replace=False,record=False):
+        start_time = time.time()
+        imported_count = 0
+        invalid_count = 0
+
+        # 替换模式：直接调用清空方法
+        if replace:
+            self.clear()
+
+        current_idx = max(self.word2idx.values()) + 1 if self.word2idx else 0
+
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        invalid_count += 1
+                        continue
+                    parts = line.split()
+                    if len(parts) < 2:
+                        invalid_count += 1
+                        continue
+
+                    word = parts[0]
+                    try:
+                        vec = np.array(parts[1:], dtype=np.float32)
+                    except ValueError:
+                        invalid_count += 1
+                        continue
+
+                    self.add(word=word, idx=current_idx, vec=vec, count=1, available=True)
+                    imported_count += 1
+                    current_idx += 1
+
+            cost_time = round(time.time() - start_time, 4)
+            if record:
+                log(f"词表文件导入完成 | 文件：{filename} | 模式：{'替换' if replace else '追加'}")
+                log(f"用时：{cost_time}s | 成功导入：{imported_count} 词 | 无效行：{invalid_count}")
+                log(f"词表【{self.name}】当前有效词：{len(self.word2idx)} 个")
+
+        except FileNotFoundError:
+            log(f"导入失败：文件【{filename}】不存在！", 2)
+        except Exception as e:
+            log(f"导入异常：{str(e)}", 2)
+
+    # 14.从分表导入
+    def import_from_subvocab(self, *subvocab):
+        start_time = time.time()
+        total_merge = 0
+        valid_merge = 0
+        invalid_merge = 0
+        skip_invalid = 0
+
+        for sub in subvocab:
+            if not isinstance(sub, Vocab):
+                skip_invalid += 1
+                continue
+
+            # 合并有效分区
+            for word, idx in sub.word2idx.items():
+                vec = sub.word2vec[word]
+                count = sub.word2count[word]
+                if word in self.word2idx:
+                    self.word2count[word] += count
+                else:
+                    self.add(word, idx, vec, count, available=True)
+                valid_merge += 1
+                total_merge += 1
+
+            # 合并无效分区
+            for word, idx in sub.u_word2idx.items():
+                vec = sub.u_word2vec[word]
+                count = sub.u_word2count[word]
+                if word in self.u_word2idx:
+                    self.u_word2count[word] += count
+                else:
+                    self.add(word, idx, vec, count, available=False)
+                invalid_merge += 1
+                total_merge += 1
+
+        cost_time = round(time.time() - start_time, 4)
+        log(f"批量导入子词表完成 | 源表数量：{len(subvocab)} | 跳过非Vocab实例：{skip_invalid}")
+        log(f"耗时：{cost_time}s | 合并总词数：{total_merge} | 有效词：{valid_merge} | 无效词：{invalid_merge}")
+        log(f"词表【{self.name}】当前有效词：{len(self.word2idx)} 个 | 无效词：{len(self.u_word2idx)} 个")
+
+    # 15.词表统计
+    def stats(self):
+        """输出词表完整统计信息"""
+        # 词汇量：词的个数
+        valid_vocab = len(self.word2idx)
+        invalid_vocab = len(self.u_word2idx)
+        total_vocab = valid_vocab + invalid_vocab
+
+        # token数：词频累加
+        valid_token = sum(self.word2count.values())
+        invalid_token = sum(self.u_word2count.values())
+        total_token = valid_token + invalid_token
+
+        log(f"📊 词表【{self.name}】统计信息", 1)
+        log(f"总词汇量：{total_vocab} | 总token数：{total_token}")
+        log(f"有效词汇：{valid_vocab} | 有效token：{valid_token}")
+        log(f"无效词汇：{invalid_vocab} | 无效token：{invalid_token}", 2)
+
+    # 16.词表搜索
+    def search(self, term, fuzziness=0.0,record=False):
+        """
+        搜索词表，返回结果子词表
+        fuzziness=0：精确包含字符串匹配
+        fuzziness>0：基于编辑距离的模糊匹配
+        """
+        result_vocab = Vocab(name=f"{self.name}_search_{term}_{fuzziness}")
+        all_words = set(list(self.word2idx.keys()) + list(self.u_word2idx.keys()))
+
+        for word in all_words:
+            match = False
+            if fuzziness == 0.0:
+                match = term in word
+            else:
+                max_dist = max(1, int(len(word) * fuzziness))
+                dist = levenshtein_distance(term, word)
+                match = dist <= max_dist
+
+            if match:
+                # 复制状态与数据
+                if word in self.word2idx:
+                    result_vocab.add(
+                        word, self.word2idx[word], self.word2vec[word],
+                        self.word2count[word], available=True
+                    )
+                if word in self.u_word2idx:
+                    result_vocab.add(
+                        word, self.u_word2idx[word], self.u_word2vec[word],
+                        self.u_word2count[word], available=False
+                    )
+
+        if record:
+            log(f"搜索完成 | 词表：{self.name} | 关键词：{term} | 模糊度：{fuzziness}")
+            log(f"命中词汇：{len(result_vocab.word2idx)+len(result_vocab.u_word2idx)} 个", 2)
+        return result_vocab
+
+    # 17.词表筛选
+    def filter(self, freq=None, record=False):
+        freq_dist = self.freq_distribution(available_only=True)
+        if freq is None:
+            freq = max(freq_dist.keys()) if freq_dist else 0
+
+        filter_vocab = Vocab(name=f"{self.name}_filter_ge{freq}")
+
+        # 筛选有效词
+        for word, count in self.word2count.items():
+            if count >= freq:
+                filter_vocab.add(
+                    word, self.word2idx[word], self.word2vec[word],
+                    count, available=True
+                )
+        # 筛选无效词（保持无效）
+        for word, count in self.u_word2count.items():
+            if count >= freq:
+                filter_vocab.add(
+                    word, self.u_word2idx[word], self.u_word2vec[word],
+                    count, available=False
+                )
+
+        if record:
+            log(f"筛选完成 | 词表：{self.name} | 最小词频：{freq}")
+            log(f"筛选后词汇：{len(filter_vocab.word2idx)+len(filter_vocab.u_word2idx)} 个", 2)
+        return filter_vocab
+
+    # 18.频数分布
+    def freq_distribution(self, in_ratio=False, available_only=True):
+        count_dict = {}
+        total = 0
+
+        # 统计有效分区
+        for cnt in self.word2count.values():
+            count_dict[cnt] = count_dict.get(cnt, 0) + 1
+            total += 1
+
+        # 统计无效分区
+        if not available_only:
+            for cnt in self.u_word2count.values():
+                count_dict[cnt] = count_dict.get(cnt, 0) + 1
+                total += 1
+
+        # 转占比
+        if in_ratio and total > 0:
+            count_dict = {k: round(v/total, 4) for k, v in count_dict.items()}
+
+        return dict(sorted(count_dict.items()))
+
+    # 19.词频
+    def freq(self, word, available_only=True):
+        # 总频数
+        total = sum(self.word2count.values())
+        if not available_only:
+            total += sum(self.u_word2count.values())
+        # 当前词频数
+        cnt = self.get_count(word, available_only)
+        return cnt / total if total > 0 else 0.0
+
+    # 20.无效清理
+    def clear_u(self, record=False):
+        self.u_word2idx.clear()
+        self.u_word2vec.clear()
+        self.u_word2count.clear()
+        if record:
+            log(f"无效分区已清空 | 词表：{self.name}")
+
+    # 21.词表导出
+    def export(self, path, file_type="txt", record=False, with_u=False, mark_u=True):
+        try:
+            # 只支持通用 txt（NLP 行业标准）
+            if file_type.lower() != "txt":
+                log(f"仅支持 txt 导出，已自动修正", 2)
+                file_type = "txt"
+
+            file_path = f"{path}.{file_type}"
+            with open(file_path, "w", encoding="utf-8") as f:
+                # 导出有效词
+                for w in self.word2idx:
+                    idx = self.word2idx[w]
+                    vec = " ".join(map(str, self.word2vec[w].tolist()))
+                    cnt = self.word2count[w]
+                    f.write(f"{w} {idx} {vec} {cnt}\n")
+
+                if with_u:
+                    f.write("\n")
+
+                    # 导出无效词（标记 unavailable）
+                    for w in self.u_word2idx:
+                        idx = self.u_word2idx[w]
+                        vec = " ".join(map(str, self.u_word2vec[w].tolist()))
+                        cnt = self.u_word2count[w]
+                        if mark_u:
+                            f.write(f"{w} {idx} {vec} {cnt} unavailable\n")
+                        else:
+                            f.write(f"{w} {idx} {vec} {cnt}\n")
+
+            if record:
+                log(f"词表导出成功 | 路径：{file_path}")
+        except Exception as e:
+            if record:
+                log(f"导出失败：{str(e)}", 2)
+
+    # 22.合并旧版词表
+    def merge_legacy_vocab(self):
+        self.import_from_subvocab(migrate_legacy_vocab())
+
+    # 23.显示词表
+    def show_vocab(self, available_only=False):
+        """
+        日志可视化展示词表内容
+        :param available_only: True=仅展示有效词 False=展示全部词(有效+无效)
+        """
+        # 标题分隔线
+        log("=" * 100)
+        log(f"📖 词表展示 | 名称：{self.name} | 模式：{'仅有效词' if available_only else '全部词'}")
+        log("=" * 100)
+
+        # 1. 展示有效词汇
+        valid_words = list(self.word2idx.items())
+        total_valid_token = sum(self.word2count.values())
+        # 按【词频降序 + 字典序升序】排序
+        valid_words_sorted = sorted(
+            valid_words,
+            key=lambda x: (-self.word2count[x[0]], x[0])
+        )
+
+        log(f"\n✅ 有效词汇（共 {len(valid_words)} 个）：")
+        log("-" * 90)
+        if valid_words_sorted:
+            for idx, (word, word_idx) in enumerate(valid_words_sorted, 1):
+                count = self.word2count[word]
+                # 计算频率（百分比）
+                freq = (count / total_valid_token * 100) if total_valid_token != 0 else 0.0
+                vec = self.word2vec[word]
+                vec_dim = vec.shape[0] if vec is not None else 0
+                log(f"[{idx:2d}] 索引：{word_idx:4d} | 单词：{word:<15} | 频数：{count:4d} | 频率：{freq:6.2f}% | 向量维度：{vec_dim}d")
+        else:
+            log("    暂无有效词汇")
+
+        # 2. 展示无效词汇
+        if not available_only:
+            invalid_words = list(self.u_word2idx.items())
+            total_invalid_token = sum(self.u_word2count.values())
+            invalid_words_sorted = sorted(
+                invalid_words,
+                key=lambda x: (-self.u_word2count[x[0]], x[0])
+            )
+
+            log(f"\n❌ 无效词汇（共 {len(invalid_words)} 个）：")
+            log("-" * 90)
+            if invalid_words_sorted:
+                for idx, (word, word_idx) in enumerate(invalid_words_sorted, 1):
+                    count = self.u_word2count[word]
+                    # 计算频率（百分比）
+                    freq = (count / total_invalid_token * 100) if total_invalid_token != 0 else 0.0
+                    vec = self.u_word2vec[word]
+                    vec_dim = vec.shape[0] if vec is not None else 0
+                    log(f"[{idx:2d}] 索引：{word_idx:4d} | 单词：{word:<15} | 频数：{count:4d} | 频率：{freq:6.2f}% | 向量维度：{vec_dim}d")
+            else:
+                log("    暂无无效词汇")
+
+        # 3. 底部统计总结
+        log("-" * 100)
+        self.stats()
+        log("=" * 100 + "\n")
+
+# 旧版词表整理
+def migrate_legacy_vocab():
+    """
+    【无参数一键迁移】
+    自动读取全局旧数据：token(有效词)、token_bin(无效词)、embed(词向量)、word2idx(索引)
+    整理为标准 Vocab 实例并返回
+    """
+    # 读取
+    legacy_token = token
+    legacy_token_bin = token_bin
+    legacy_embed = embed
+    legacy_word2idx = word2idx
+
+    # 初始化目标词表
+    vocab = Vocab(name="final_migrated_vocab")
+
+    # 空数据判断
+    if not legacy_token and not legacy_token_bin:
+        log(f"旧词表为空，迁移完成", 2)
+        return vocab
+
+    # 自动匹配向量维度
+    vec_dim = 100
+    if isinstance(legacy_embed, np.ndarray) and legacy_embed.ndim == 2:
+        vec_dim = legacy_embed.shape[1]
+
+    # 初始化索引
+    current_idx = 0
+
+    # 统计变量
+    start_time = time.time()
+    valid_migrate = 0
+    valid_vec_migrate = 0
+    invalid_migrate = 0
+
+    # 迁移 有效词 + 训练好的词向量
+    for word, count in legacy_token.items():
+        word = word.strip().lower()
+        if not word:
+            continue
+
+        # 读取旧向量
+        vec = np.zeros(vec_dim, dtype=np.float32)
+        if word in legacy_word2idx:
+            old_idx = legacy_word2idx[word]
+            if 0 <= old_idx < len(legacy_embed):
+                vec = legacy_embed[old_idx].astype(np.float32)
+                valid_vec_migrate += 1
+
+        # 添加到词表
+        vocab.add(word, current_idx, vec, count, available=True)
+        current_idx += 1
+        valid_migrate += 1
+
+    # 迁移 无效词（零向量）
+    for word, count in legacy_token_bin.items():
+        word = word.strip().lower()
+        if not word:
+            continue
+
+        vec = np.zeros(vec_dim, dtype=np.float32)
+        vocab.add(word, current_idx, vec, count, available=False)
+        current_idx += 1
+        invalid_migrate += 1
+
+    # 日志输出
+    cost_time = round(time.time() - start_time, 4)
+    log(f"旧词表一键迁移完成！", 1)
+    log(f"耗时：{cost_time}s")
+    log(f"有效词：{valid_migrate} 个（含训练向量：{valid_vec_migrate} 个）")
+    log(f"无效词：{invalid_migrate} 个")
+    vocab.stats()
+
+    # 返回整理完成的词表实例
+    return vocab
+
+# 旧版词表清空
+def clear_legacy_vocab():
+    """
+    【无参数一键清空】
+    清空所有旧版词表数据：token、token_bin、embed、word2idx
+    """
+    global token, token_bin, embed, word2idx
+
+    # 清空所有旧数据
+    token.clear()
+    token_bin.clear()
+    embed = np.array([])
+    word2idx = {}
+
+    log("✅ 旧版词表所有数据已完全清空", 2)
+
+# 旧版词表检测
+def has_legacy_vocab_data():
+    """
+    【无参数检测】
+    检查是否存在旧版词表数据（任意一个不为空就返回 True）
+    :return: True = 有旧数据 | False = 无旧数据
+    """
+    global token, token_bin, embed, word2idx
+
+    # 只要任意一个有数据，就返回 True
+    has_data = (
+            len(token) > 0
+            or len(token_bin) > 0
+            or (isinstance(embed, np.ndarray) and embed.size > 0)
+            or len(word2idx) > 0
+    )
+    return has_data
+
+# 莱文斯坦距离
+def levenshtein_distance(s1, s2):
+    if len(s1) < len(s2):
+        return levenshtein_distance(s2, s1)
+    if len(s2) == 0:
+        return len(s1)
+    previous_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    return previous_row[-1]
+
+# 主词表
+core_vocab = Vocab("core_vocab")
+
+#流程控制
+if not is_debugging:
+    homepage()
