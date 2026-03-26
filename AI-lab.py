@@ -284,7 +284,7 @@ def main_page_NLP(reset=False):
         if reset:
             before_training()
             reset = False
-        log("NLP main page:0.退出 1.基本功能 2.词向量计算 3.进入新版主页")
+        log("NLP main page（旧版）:0.退出 1.基本功能 2.词向量计算 3.进入新版主页")
         log(">>entrance：",False)
         choice = input()
         if choice == "0":
@@ -614,13 +614,16 @@ def base_NLP():
                 clear_legacy_vocab()
                 log("清理完成。词库管理系统现在可以被正常使用！")
             while True:
-                match menu2("词库管理", "skill", "返回主页","词库统计","词库显示","词库搜索","词库导出"):
+                match menu2("词库管理", "skill", "返回主页","词库统计","词库显示","词库搜索","词库导出","词库导入"):
                     case 0:
                         return -2
+                    # 词库统计
                     case 1:
                         core_vocab.stats()
+                    # 词库显示
                     case 2:
                         core_vocab.show_vocab()
+                    # 词库搜索
                     case 3:
                         log("欢迎使用搜索————")
                         log("输入搜索词：", False)
@@ -637,11 +640,31 @@ def base_NLP():
                             log("输入不合法，将使用default值0.5")
                             f=0.5
 
-                        core_vocab.search(for_searching,f).show_vocab(True)
+                        core_vocab.search(for_searching,f).show_vocab()
+                    # 词库导出
                     case 4:
                         core_vocab.export(f"词表 {core_vocab.name} {get_time()}")
+                    # 词库导入
                     case 5:
-                        pass
+                        a=1
+                        path=''
+                        while a==1:
+                            a-=1
+                            match menu2("词库资源", "select", "返回", "Stanford2024","自定义文件"):
+                                case 0:
+                                    continue
+                                case 1:
+                                    path=os.path.join("资源","dolma_300_2024_1.2M.100_combined")
+                                    log("这可能需要几分钟，请等待……")
+                                case 2:
+                                    log("输入文件路径：", False)
+                                    path=i_log(input())
+                            core_vocab.import_from_file(path+".txt",False,True)
+                            match menu2("清除词频？","choice","否","是"):
+                                case 0:
+                                    pass
+                                case 1:
+                                    core_vocab.clear_freq()
                     case 6:
                         pass
                 log('')
@@ -672,7 +695,7 @@ def homepage(reset=True):
 #NLP主页
 def mainpage_NLP():
     while (True):
-        match menu2("NLP mainpage", "entrance", "返回主页", "基本功能", "词向量计算"):
+        match menu2("NLP mainpage", "entrance", "返回主页", "基本功能", "词向量计算", "推理模式"):
             case 0:
                 return -2
             case 1:
@@ -680,6 +703,8 @@ def mainpage_NLP():
             case 2:
                 log("说明：将使用旧版主页访问该模块。")
                 main_page_NLP(True)
+            case 3:
+                run_reasoning_mode(core_vocab)
 
 #CV主页
 def mainpage_CV():
@@ -802,28 +827,21 @@ class Vocab:
         return selected
 
     # 10.余弦相似度
-    def similarity(self, word1, word2):
-        # 获取两个词的向量
-        vec1 = self.get_vec(word1, available_only)
-        vec2 = self.get_vec(word2, available_only)
+    def similarity(self, word1, word2, target_vec=None):
+        vec1 = self.get_vec(word1)
+        vec2 = target_vec if target_vec is not None else self.get_vec(word2)
 
-        # 异常处理
         if vec1 is None or vec2 is None:
             return 0.0
-
         if vec1.shape != vec2.shape:
             return 0.0
 
-        # 计算
         dot_product = np.dot(vec1, vec2)
         norm1 = np.linalg.norm(vec1)
         norm2 = np.linalg.norm(vec2)
 
-        # 避免除零错误
         if norm1 == 0 or norm2 == 0:
             return 0.0
-
-        #返回值
         return dot_product / (norm1 * norm2)
 
     # 11.维度清洗
@@ -1047,7 +1065,7 @@ class Vocab:
 
     # 17.词表筛选
     def filter(self, freq=None, record=False):
-        freq_dist = self.freq_distribution(available_only=True)
+        freq_dist = self.freq_distribution(available_only)
         if freq is None:
             freq = max(freq_dist.keys()) if freq_dist else 0
 
@@ -1213,6 +1231,16 @@ class Vocab:
         self.stats()
         log("=" * 100 + "\n")
 
+    # 24.清除词频信息
+    def clear_freq(self):
+            # 重置有效词频数
+        for word in self.word2count:
+            self.word2count[word] = 1
+
+            # 重置无效词频数
+        for word in self.u_word2count:
+            self.u_word2count[word] = 1
+
 # 旧版词表整理
 def migrate_legacy_vocab():
     """
@@ -1339,6 +1367,150 @@ def levenshtein_distance(s1, s2):
             current_row.append(min(insertions, deletions, substitutions))
         previous_row = current_row
     return previous_row[-1]
+
+# 推理模式
+def run_reasoning_mode(main_vocab):
+    """
+    独立全局推理模式
+    :param main_vocab: 主词表 Vocab 实例（如 core_vocab）
+    :return: 推理专用分表
+    """
+    # 创建推理专用分表
+    reasoning_vocab = Vocab(name=f"{main_vocab.name}_reasoning")
+    log(f"🧠 推理模式启动 | 已创建推理分表：{reasoning_vocab.name}", 2)
+
+    # 内部核心函数：引导输入加权词汇组合（已修复None报错）
+    def _input_weighted_combo():
+        log("\n✍️  请逐行输入【词 权重】（空格分隔），完成输入 END 结束：")
+        log("示例：king 1.0  |  man -1.0  |  woman 1.0")
+        combo_parts = []
+        combo_vec = None
+
+        while True:
+            line = i_log(input(), newline=1, prefix=False).strip()
+            if line.upper() == "END":
+                break
+            if not line:
+                continue
+
+            parts = line.split()
+            if len(parts) != 2:
+                log("⚠️  格式错误，请输入：词 权重（空格分隔）")
+                continue
+
+            word, w_str = parts
+            try:
+                weight = float(w_str)
+            except ValueError:
+                log("⚠️  权重必须为数字")
+                continue
+
+            if word not in main_vocab.word2idx:
+                log(f"⚠️  主词表中无词汇：{word}，已跳过")
+                continue
+
+            vec = main_vocab.get_vec(word)
+            if vec is None:
+                continue
+
+            # 自动初始化向量（彻底修复None报错）
+            if combo_vec is None:
+                combo_vec = np.zeros_like(vec, dtype=np.float32)
+
+            combo_vec += weight * vec
+            sign = "+" if weight >= 0 else ""
+            combo_parts.append(f"{sign}{weight}*{word}")
+
+        if not combo_parts or combo_vec is None:
+            log("⚠️  未输入有效词汇组合，返回")
+            return None, "", ""
+
+        # 表达式过长自动省略
+        expr = "".join(combo_parts)
+        display_expr = expr if len(expr) <= 40 else f"...{expr[-40:]}"
+        log(f"\n✅ 组合表达式：{display_expr}")
+
+        mix_name = f"mix_{len(reasoning_vocab.word2idx)}"
+        return combo_vec, expr, mix_name
+
+    # 推理模式主菜单
+    while True:
+        log("\n==================== 推理模式菜单 ====================")
+        log("1.逻辑匹配（组合向量→查找主表相似独立词）")
+        log("2.逻辑分析（输入两组组合→计算相似度）")
+        log("0.退出推理模式")
+        log("========================================================")
+        log(">> 请选择功能：", newline=False)
+        choice = i_log(input(), newline=1, prefix=False).strip()
+
+        # 退出
+        if choice == "0":
+            log(f"\n👋 推理模式已退出 | 推理分表保留：{reasoning_vocab.name}", 2)
+            return reasoning_vocab
+
+        # 逻辑匹配
+        elif choice == "1":
+            combo_res = _input_weighted_combo()
+            if combo_res[0] is None:
+                continue
+            combo_vec, expr, mix_name = combo_res
+
+            # 存入推理分表
+            max_idx = max(reasoning_vocab.word2idx.values()) + 1 if reasoning_vocab.word2idx else 0
+            reasoning_vocab.add(word=mix_name, idx=max_idx, vec=combo_vec, count=1, available=True)
+            log(f"✅ 组合向量已存入推理分表：{mix_name}")
+
+            # 相似度阈值
+            log(">> 请输入相似度阈值（0~1，默认0.5）：", newline=False)
+            threshold_str = i_log(input(), newline=1, prefix=False).strip()
+            threshold = float(threshold_str) if threshold_str else 0.5
+            threshold = max(0.0, min(1.0, threshold))
+
+            # 匹配主表词汇
+            match_results = []
+            for word in main_vocab.word2idx:
+                sim = main_vocab.similarity(word, mix_name, target_vec=combo_vec)
+                if sim >= threshold:
+                    match_results.append((word, sim))
+
+            # 排序输出
+            match_results.sort(key=lambda x: -x[1])
+            log(f"\n🔍 逻辑匹配结果（阈值≥{threshold}）：")
+            log("-" * 60)
+            if match_results:
+                for i, (word, sim) in enumerate(match_results, 1):
+                    log(f"[{i:2d}] {word:<15} 相似度：{sim:.4f}")
+            else:
+                log("    未找到符合阈值的词汇")
+            log("-" * 60)
+
+        # 逻辑分析（手动输入两组组合，无需分表）
+        elif choice == "2":
+            log("\n📝 请输入【第一组逻辑组合】")
+            vec1, expr1, _ = _input_weighted_combo()
+            if vec1 is None:
+                continue
+
+            log("\n📝 请输入【第二组逻辑组合】")
+            vec2, expr2, _ = _input_weighted_combo()
+            if vec2 is None:
+                continue
+
+            # 计算相似度
+            dot_product = np.dot(vec1, vec2)
+            norm1 = np.linalg.norm(vec1)
+            norm2 = np.linalg.norm(vec2)
+            sim = dot_product / (norm1 * norm2) if (norm1 != 0 and norm2 != 0) else 0.0
+
+            # 输出结果
+            log("\n" + "=" * 70)
+            log(f"组合1：{expr1 if len(expr1) <= 60 else f'...{expr1[-60:]}'}")
+            log(f"组合2：{expr2 if len(expr2) <= 60 else f'...{expr2[-60:]}'}")
+            log(f"🎯 两组组合逻辑相似度 = {sim:.4f}")
+            log("=" * 70)
+
+        else:
+            log("⚠️  无效选项，请重新输入")
 
 # 主词表
 core_vocab = Vocab("core_vocab")
