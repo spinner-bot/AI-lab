@@ -1,5 +1,6 @@
 #AI-lab 开发者：浪兮（hhu2524030232张锐寒）
 
+
 """
     【AI-lab】
     Learning codes, implementations and notes for NLP, CV
@@ -8,6 +9,7 @@
 
     https://github.com/spinner-bot/AI-lab
 """
+
 
 is_debugging=0
 
@@ -602,7 +604,7 @@ def menu(menu_name,guidance="choice",back="返回",*entrance):
 
 #基本功能
 def base_NLP():
-    match menu2("基本功能(NLP版)", "skill", "返回主页","词库管理"):
+    match menu2("基本功能(NLP版)", "skill", "返回主页","词库管理","文库管理"):
         case 0:
             return -2
         case 1:
@@ -614,7 +616,7 @@ def base_NLP():
                 clear_legacy_vocab()
                 log("清理完成。词库管理系统现在可以被正常使用！")
             while True:
-                match menu2("词库管理", "skill", "返回主页","词库统计","词库显示","词库搜索","词库导出","词库导入"):
+                match menu2("词库管理", "skill", "返回主页","词库统计","查看词库","模糊搜索","文件导出","文件导入","一键清洗","分表管理"):
                     case 0:
                         return -2
                     # 词库统计
@@ -666,8 +668,12 @@ def base_NLP():
                                 case 1:
                                     core_vocab.clear_freq()
                     case 6:
-                        pass
+                        core_vocab.dim_clean()
+                    case 7:
+                        sub_table_manager()
                 log('')
+        case 2:
+            library_manager()
 
 #基本功能
 def base_CV():
@@ -681,7 +687,7 @@ def homepage(reset=True):
         log_reset("AI-lab")
         log("【AI-lab】 开发者：spinner-bot 抖音@浪兮有点浪")
     while(True):
-        match menu2("AI-lab homepage", "entrance", "退出", "NLP", "CV"):
+        match menu2("AI-lab homepage", "entrance", "退出", "NLP", "CV","RS"):
             case 0:
                 print("确认退出？[y]/n")
                 if input(">>") == "y":
@@ -691,6 +697,8 @@ def homepage(reset=True):
                 mainpage_NLP()
             case 2:
                 mainpage_CV()
+            case 3:
+                mainpage_RS()
 
 #NLP主页
 def mainpage_NLP():
@@ -717,8 +725,17 @@ def mainpage_CV():
 
 # 词表封装
 class Vocab:
+    #注册表
+    _TABLE_REGISTRY = {}
+    _MAIN_TABLE = "core_vocab"
+
+    #创建表
     def __init__(self, name, parent_vocab=None, keep_words: tuple = None):
         self.name = name
+
+        #分表注册
+        if not name == "core_vocab":
+            self._register_self()
 
         # 有效分区
         self.word2idx = {}
@@ -744,6 +761,10 @@ class Vocab:
                     self.u_word2idx[word] = parent_vocab.u_word2idx[word]
                     self.u_word2vec[word] = parent_vocab.u_word2vec[word]
                     self.u_word2count[word] = parent_vocab.u_word2count[word]
+
+    # 0.自动注册
+    def _register_self(self):
+        Vocab._TABLE_REGISTRY[self.name] = self
 
     # 1.添加词
     def add(self, word, idx, vec, count,available=True):
@@ -1241,6 +1262,9 @@ class Vocab:
         for word in self.u_word2count:
             self.u_word2count[word] = 1
 
+# 主词表
+core_vocab = Vocab("core_vocab")
+
 # 旧版词表整理
 def migrate_legacy_vocab():
     """
@@ -1512,9 +1536,602 @@ def run_reasoning_mode(main_vocab):
         else:
             log("⚠️  无效选项，请重新输入")
 
-# 主词表
-core_vocab = Vocab("core_vocab")
+# RS主页
+def mainpage_RS():
+    while (True):
+        match menu2("RS mainpage", "entrance", "返回主页" ):
+            case 0:
+                return -2
 
-#流程控制
+# 分表管理
+def sub_table_manager():
+    global core_vocab
+    # 主表降级后缀（可自行修改）
+    OLD_MAIN_SUFFIX = "_main_old"
+
+    while True:
+        log("\n" + "=" * 85)
+        log("📋 分表管理中心 | Vocab Table Manager")
+        log("=" * 85)
+        # 优化排版：名称列加宽
+        log(f"{'索引':<4} | {'表名称':<40} | {'类型':<6} | {'有效词汇数':<8} | {'向量维度':<8} | {'状态'}")
+        log("-" * 85)
+
+        table_index_map = []
+        registry = Vocab._TABLE_REGISTRY
+
+        # 显示当前主表（安全获取向量维度，空表不报错）
+        main_ins = core_vocab
+        w_num = len(main_ins.word2idx)
+        vec_dim = "未知"
+        if main_ins.word2vec:  # 关键修复：判断字典非空再取值
+            vec_dim = next(iter(main_ins.word2vec.values())).shape[0]
+        log(f"[1  ] | {main_ins.name:<40} | 主表    | {w_num:<8} | {vec_dim:<8} | ✅ 系统主表")
+        table_index_map.append(("main", main_ins, True))
+
+        # 关键修复：单条固定分隔线，不重复
+        log("-" * 85)
+
+        # 显示分表
+        has_sub = False
+        display_idx = 2
+        for name, ins in registry.items():
+            has_sub = True
+            w_num = len(ins.word2idx)
+            # 安全获取向量维度
+            vec_dim_sub = "未知"
+            if ins.word2vec:
+                vec_dim_sub = next(iter(ins.word2vec.values())).shape[0]
+            log(f"[{display_idx:<2}] | {name:<40} | 分表    | {w_num:<8} | {vec_dim_sub:<8} | ⭕ 可操作")
+            table_index_map.append((name, ins, False))
+            display_idx += 1
+
+        if not has_sub:
+            log(" " * 40 + "📭 暂无分表")
+        log("=" * 85)
+
+        # 操作菜单
+        log("\n【操作说明】")
+        log("  0 → 退出管理")
+        log("  1 → 操作主表")
+        log(" ≥2 → 操作对应分表")
+        choice = input("\n请输入操作索引：").strip()
+
+        # 退出
+        if choice == "0":
+            log("\n👋 退出分表管理")
+            return
+
+        # 索引校验
+        if not choice.isdigit():
+            log("❌ 输入无效！请输入数字！")
+            continue
+        target_idx = int(choice) - 1
+        if target_idx < 0 or target_idx >= len(table_index_map):
+            log("❌ 输入无效！索引超出范围！")
+            continue
+
+        # 获取选中表
+        _, ins, is_main = table_index_map[target_idx]
+        log(f"\n🎯 选中：{ins.name}（{'主表' if is_main else '分表'}）")
+
+        # =====================
+        # 主表操作（重命名 + 清空）
+        # =====================
+        if is_main:
+            op = menu2("主表操作", "choice", "返回", "重命名", "清空词表数据")
+            if op == 0:
+                continue
+            # 重命名
+            elif op == 1:
+                new_name = input("请输入新名称：").strip()
+                if not new_name:
+                    log("❌ 名称不能为空！")
+                    continue
+                ins.name = new_name
+                log(f"✅ 主表已重命名为：{new_name}")
+            # 清空数据
+            elif op == 2:
+                if input("⚠️ 确认清空主表所有数据？(y/n)：").lower() == "y":
+                    ins.clear()
+                    log("✅ 主表数据已清空！")
+
+        # =====================
+        # 分表操作
+        # =====================
+        else:
+            op = menu2("分表操作", "choice", "返回", "升级为主表", "重命名", "删除分表")
+            if op == 0:
+                continue
+            # 🔥 升级为主表：不改名！保留原名称
+            elif op == 1:
+                # 自动去除降级后缀
+                final_name = ins.name.replace(OLD_MAIN_SUFFIX, "")
+                ins.name = final_name
+
+                # 旧主表降级为分表（加后缀）
+                old_main = core_vocab
+                old_main.name = f"{old_main.name}{OLD_MAIN_SUFFIX}"
+                # 注册旧主表到分表
+                Vocab._TABLE_REGISTRY[old_main.name] = old_main
+
+                # ✅ 新主表直接替换，绝不修改名称
+                core_vocab = ins
+
+                # 从分表列表中移除当前表
+                if ins.name in Vocab._TABLE_REGISTRY:
+                    del Vocab._TABLE_REGISTRY[ins.name]
+
+                log(f"✅ 【{ins.name}】已升级为主表！原主表已降级为分表")
+
+            # 分表重命名（禁止使用 core_vocab）
+            elif op == 2:
+                new_name = input("请输入新名称：").strip()
+                if not new_name:
+                    log("❌ 名称不能为空！")
+                    continue
+                if new_name == "core_vocab":
+                    log("❌ 禁止使用名称 core_vocab！")
+                    continue
+                del registry[ins.name]
+                ins.name = new_name
+                registry[new_name] = ins
+                log(f"✅ 分表已重命名为：{new_name}")
+
+                # 删除分表
+            elif op == 3:
+                if input(f"⚠️ 确认删除分表 {ins.name}？(y/n)：").lower() == "y":
+                    del registry[ins.name]
+                    log(f"🗑️ 已删除分表：{ins.name}")
+
+# 文库管理
+def library_manager():
+    global read_list
+    # ===================== 核心配置 =====================
+    PREVIEW_LINE_LIMIT = 20
+    PREVIEW_WORD_LIMIT = 500
+    PREVIEW_CHAR_LIMIT = 1800
+    SEP = "\\"
+    nav_stack = [""]
+    INVALID_CHARS = r'[<>:"|?*]'
+    BASE_DIR = "训练文本"
+    SNIPPET_AROUND = 80
+    MAX_EXPAND_CHAR = 10
+    # 全局显示宽度（仅设置1次）
+    GLOBAL_WIDTH = 0
+
+    # ===================== 全局统一设置行宽（仅进入系统时调用1次） =====================
+    def set_global_width():
+        nonlocal GLOBAL_WIDTH
+        while True:
+            inp = input("请设置全局显示宽度（0=不换行，a/auto=自动，数字=固定）：").strip().lower()
+            if inp == "0":
+                GLOBAL_WIDTH = 0
+                log("✅ 全局宽度：不自动换行")
+                break
+            elif inp in ("a", "auto"):
+                try:
+                    GLOBAL_WIDTH = os.get_terminal_size().columns - 4
+                    log(f"✅ 全局宽度：自动获取({GLOBAL_WIDTH}列)")
+                except:
+                    log("❌ 自动获取不可用，已设置为不换行")
+                    GLOBAL_WIDTH = 0
+                break
+            elif inp.isdigit() and int(inp) >= 10:
+                GLOBAL_WIDTH = int(inp)
+                log(f"✅ 全局宽度：{GLOBAL_WIDTH}列")
+                break
+            else:
+                log("❌ 输入无效，请重新输入")
+
+    # ===================== 智能扩展上下文到完整单词 =====================
+    def expand_to_full_word(text, pos, left=True):
+        current = pos
+        expanded = 0
+        boundaries = ' \n\t\r.,;!?()[]{}<>"\'/:\\-=+'
+        while expanded < MAX_EXPAND_CHAR:
+            if current < 0 or current >= len(text):
+                break
+            if text[current] in boundaries:
+                break
+            current += -1 if left else 1
+            expanded += 1
+        return current + 1 if left else current - 1
+
+    # ===================== 文件大小自动格式化（全单位） =====================
+    def format_file_size(size_bytes):
+        if size_bytes <= 0:
+            return "0.0 B"
+        units = ["B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"]
+        size = size_bytes
+        unit_idx = 0
+        while size >= 1024 and unit_idx < len(units) - 1:
+            size /= 1024
+            unit_idx += 1
+        return f"{size:.1f} {units[unit_idx]}"
+
+    # ===================== 智能换行：不截断词+超长词加连字符 =====================
+    def split_long_word(word, width):
+        parts = []
+        max_part = width - 1
+        i = 0
+        while i < len(word):
+            if i + max_part < len(word):
+                part = word[i:i+max_part] + "-"
+                parts.append(part)
+                i += max_part
+            else:
+                parts.append(word[i:])
+                break
+        return parts
+
+    def wrap_for_preview(text, width):
+        if width <= 0:
+            return text
+        raw_lines = text.splitlines()
+        final_lines = []
+        for line in raw_lines:
+            if not line.strip():
+                final_lines.append("")
+                continue
+            words = line.split()
+            current_line = ""
+            for word in words:
+                word_len = len(word)
+                if word_len > width:
+                    if current_line:
+                        final_lines.append(current_line.rstrip())
+                        current_line = ""
+                    word_parts = split_long_word(word, width)
+                    final_lines.extend(word_parts)
+                    continue
+                test_line = current_line + word + " "
+                if len(test_line.rstrip()) <= width:
+                    current_line = test_line
+                else:
+                    final_lines.append(current_line.rstrip())
+                    current_line = word + " "
+            if current_line:
+                final_lines.append(current_line.rstrip())
+        return "\n".join(final_lines)
+
+    # ===================== 自动校验&清理 =====================
+    def auto_validate_and_clean():
+        original = len(read_list)
+        unique = list(dict.fromkeys(read_list))
+        valid = [f for f in unique if os.path.isfile(os.path.join(BASE_DIR, f))]
+        read_list[:] = valid
+        removed = original - len(valid)
+        if removed > 0:
+            log(f"⚠️ 自动校验：删除{removed}个无效/重复文件")
+        else:
+            log("✅ 自动校验：全部有效")
+
+    # ===================== 系统级1：扫描根目录所有txt =====================
+    def scan_available_files():
+        if not os.path.isdir(BASE_DIR):
+            log(f"❌ 根目录「{BASE_DIR}」不存在，无法扫描")
+            return
+        scanned_files = []
+        for root, _, files in os.walk(BASE_DIR):
+            for file in files:
+                if file.lower().endswith(".txt"):
+                    full_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(full_path, BASE_DIR).replace("/", SEP)
+                    scanned_files.append(rel_path)
+        scanned_files = list(dict.fromkeys(scanned_files))
+        new_add = 0
+        for f in scanned_files:
+            if f not in read_list:
+                read_list.append(f)
+                new_add += 1
+        log(f"🔍 扫描完成：共找到{len(scanned_files)}个txt文件，新增导入{new_add}个")
+
+    # ===================== 系统级2：切换根目录 =====================
+    def change_root_dir():
+        nonlocal BASE_DIR
+        new_root = input("请输入新的根目录路径：").strip()
+        if not new_root:
+            log("❌ 路径不能为空")
+            return
+        if not os.path.isdir(new_root):
+            log(f"❌ 目录「{new_root}」不存在")
+            return
+        BASE_DIR = new_root
+        log(f"✅ 根目录已切换为：{BASE_DIR}")
+        auto_validate_and_clean()
+
+    # ===================== 路径规范化 =====================
+    def normalize_path(user_input):
+        p = re.sub(INVALID_CHARS, "", user_input)
+        p = p.replace("/", SEP).replace("\\\\", SEP)
+        return p[:-4] if p.lower().endswith(".txt") else p.strip()
+
+    # ===================== 构建目录列表 =====================
+    def build_current_dir():
+        cur = nav_stack[-1]
+        folders, files = set(), []
+        for fp in read_list:
+            pure = fp[:-4]
+            if cur and not pure.startswith(cur + SEP):
+                continue
+            rel = pure[len(cur):].strip(SEP)
+            if SEP in rel:
+                folders.add(rel.split(SEP)[0])
+            else:
+                files.append(rel)
+        return sorted(folders), sorted(files)
+
+    # ===================== 文件统计 =====================
+    def get_file_stats(fn):
+        path = os.path.join(BASE_DIR, fn)
+        if not os.path.isfile(path):
+            return "异常", "异常", "异常", "0.0 B", 0
+        raw_size = os.path.getsize(path)
+        size_str = format_file_size(raw_size)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                c = f.read()
+            lines = c.splitlines()
+            chars = len(c.replace("\n","").replace(" ",""))
+            words = len([w for w in t_clean(c,7) if w.strip()]) if "t_clean" in globals() else len(c.split())
+            return f"{len(lines)}行", f"{chars}字", f"{words}词", size_str, chars
+        except:
+            return "失败", "失败", "失败", "0.0 B", 0
+
+    # ===================== 文件预览（使用全局宽度） =====================
+    def file_preview(fn):
+        path = os.path.join(BASE_DIR, fn)
+        if not os.path.isfile(path):
+            log("❌ 文件不存在")
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read()
+            lines = content.splitlines()
+            total_chars = len(content.replace("\n","").replace(" ",""))
+            need_ask_fold = len(lines) > PREVIEW_LINE_LIMIT or total_chars > PREVIEW_CHAR_LIMIT
+
+            log("\n" + "="*60)
+            log(f"📄 预览：{fn}")
+            log("-"*60)
+
+            fold = False
+            if need_ask_fold:
+                c = input("内容较长，是否折叠预览？(y/n)：").strip().lower()
+                fold = c == "y"
+
+            if not fold:
+                disp = wrap_for_preview(content, GLOBAL_WIDTH)
+                log(disp)
+            else:
+                head = wrap_for_preview("\n".join(lines[:10]), GLOBAL_WIDTH)
+                tail = wrap_for_preview("\n".join(lines[-10:]), GLOBAL_WIDTH)
+                omit_l = len(lines) - 20
+                omit_c = total_chars - (len(head.replace("\n","")) + len(tail.replace("\n","")))
+                log(head)
+                log(f"\n... 省略 {omit_l} 行 ({omit_c} 字) ...\n")
+                log(tail)
+            log("="*60)
+        except Exception as e:
+            log(f"❌ 预览失败：{str(e)}")
+
+    # ===================== 全文搜索（连续查看+详情保留换行+全局宽度） =====================
+    def file_search(fn):
+        path = os.path.join(BASE_DIR, fn)
+        if not os.path.isfile(path):
+            log("❌ 文件不存在")
+            return
+        raw_key = input("请输入搜索内容：").strip()
+        if not raw_key:
+            log("❌ 搜索词不能为空")
+            return
+        key_len = len(raw_key)
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                full_text = f.read()
+        except:
+            log("❌ 读取文件失败")
+            return
+
+        positions = []
+        start = 0
+        while True:
+            idx = full_text.find(raw_key, start)
+            if idx == -1:
+                break
+            positions.append(idx)
+            start = idx + key_len
+
+        if not positions:
+            log(f"\n🔍 未找到内容：{raw_key}")
+            return
+
+        # 连续查看搜索结果
+        while True:
+            log(f"\n🔍 共找到 {len(positions)} 处匹配：")
+            log("-"*70)
+            res_map = {}
+            for i, pos in enumerate(positions, 1):
+                pre_start = max(0, pos - SNIPPET_AROUND)
+                post_end = min(len(full_text), pos + key_len + SNIPPET_AROUND)
+                pre_start = expand_to_full_word(full_text, pre_start, left=True)
+                post_end = expand_to_full_word(full_text, post_end, left=False)
+
+                # 搜索列表：换行转2空格
+                pre = full_text[pre_start:pos].replace("\n", "  ")
+                match = full_text[pos:pos+key_len].replace("\n", "  ")
+                post = full_text[pos+key_len:post_end].replace("\n", "  ")
+
+                snippet = f"...{pre}【{match}】{post}..."
+                log(f"[{i:2d}] {snippet}")
+                res_map[i] = pos
+            log("-"*70)
+
+            sel = input("选择结果序号查看详情（0=返回搜索）：").strip()
+            if sel == "0":
+                log("✅ 返回搜索界面")
+                break
+            if not sel.isdigit() or int(sel) not in res_map:
+                log("❌ 无效序号")
+                continue
+
+            ctx = input("设置上下文范围（前后字符数，如100）：").strip()
+            if not ctx.isdigit():
+                log("❌ 请输入数字")
+                continue
+            ctx_n = int(ctx)
+            pos = res_map[int(sel)]
+
+            # 详情页：保留原始换行 + 全局宽度智能换行
+            s = max(0, pos - ctx_n)
+            e = min(len(full_text), pos + key_len + ctx_n)
+            part_pre = full_text[s:pos]
+            part_match = f"【{full_text[pos:pos+key_len]}】"
+            part_post = full_text[pos+key_len:e]
+            detail_raw = f"...{part_pre}{part_match}{part_post}..."
+            detail_formatted = wrap_for_preview(detail_raw, GLOBAL_WIDTH)
+
+            log(f"\n📌 搜索结果详情（上下文{ctx_n}字符）：")
+            log("-"*70)
+            log(detail_formatted)
+            log("-"*70)
+
+    # ===================== 初始化：仅1次设置宽度 + 自动扫描 =====================
+    set_global_width()  # 进入系统只问这一次！
+    auto_validate_and_clean()
+    log("🔄 系统启动：自动扫描根目录文件...")
+    scan_available_files()
+
+    # ===================== 主循环 =====================
+    while True:
+        cur_path = nav_stack[-1]
+        folders, files = build_current_dir()
+        item_map, idx = {}, 1
+
+        log("\n" + "="*90)
+        log(f"📚 文库管理中心 | 当前根目录：{BASE_DIR}")
+        log(f"📁 当前目录：{cur_path if cur_path else '根目录'} | 文件夹：{len(folders)} | 文件：{len(files)}")
+        log("="*90)
+
+        for fld in folders:
+            item_map[idx] = ("folder", fld)
+            log(f"[{idx:2d}] 📁 {fld}")
+            idx +=1
+        for fil in files:
+            full_f = f"{cur_path}{SEP}{fil}.txt" if cur_path else f"{fil}.txt"
+            item_map[idx] = ("file", full_f)
+            log(f"[{idx:2d}] 📄 {fil}")
+            idx +=1
+
+        # 操作栏（字母指令）
+        log("-"*90)
+        log("[0] 返回/退出" if cur_path else "[0] 退出系统")
+        log("[+]添加 | [b]批量 | [d]删除 | [c]清空 | [s]扫描文件 | [r]切换根目录")
+        log("="*90)
+
+        choice = input("请输入指令：").strip().lower()
+
+        if choice == "0":
+            if not cur_path:
+                log("👋 退出文库管理")
+                return
+            nav_stack.pop()
+            continue
+
+        if choice.isdigit() and int(choice) in item_map:
+            typ, name = item_map[int(choice)]
+            if typ == "folder":
+                nav_stack.append(cur_path + SEP + name if cur_path else name)
+                continue
+            # 文件操作
+            if typ == "file":
+                while True:
+                    log("\n" + "="*60)
+                    log(f"📄 {name}")
+                    lines, chars, words, size, _ = get_file_stats(name)
+                    log(f"{size} | {lines} | {chars} | {words}")
+                    log("-"*60)
+                    log("[0] 返回 | [1] 预览 | [2] 删除 | [3] 搜索")
+                    fc = input("选择操作：").strip()
+                    if fc == "0":
+                        break
+                    elif fc == "1":
+                        file_preview(name)
+                    elif fc == "2":
+                        if input(f"⚠️ 确认删除 {name}？(y/n)：").strip().lower() == "y":
+                            if name in read_list:
+                                read_list.remove(name)
+                                log("✅ 已删除")
+                                break
+                        else:
+                            log("✅ 已取消")
+                    elif fc == "3":
+                        file_search(name)
+                    else:
+                        log("❌ 无效指令")
+                continue
+
+        if choice == "+":
+            raw = input("文件路径（无需.txt）：").strip()
+            if not raw:
+                log("❌ 不能为空")
+                continue
+            norm = normalize_path(raw)
+            target = f"{norm}.txt"
+            if not os.path.isfile(os.path.join(BASE_DIR, target)):
+                log(f"❌ 文件不存在：{target}")
+                continue
+            if target in read_list:
+                log("❌ 已存在")
+                continue
+            read_list.append(target)
+            log(f"✅ 已添加：{target}")
+            continue
+
+        if choice == "b":
+            log("\n📦 批量导入")
+            quick_import()
+            auto_validate_and_clean()
+            continue
+
+        if choice == "d":
+            di = input("输入删除序号：").strip()
+            if di.isdigit() and int(di) in item_map:
+                t_typ, t_name = item_map[int(di)]
+                if t_typ == "file":
+                    if input(f"⚠️ 确认删除文件？y/n：").lower() == "y":
+                        if t_name in read_list:
+                            read_list.remove(t_name)
+                            log("✅ 文件已删除")
+                else:
+                    pre = cur_path + SEP + t_name if cur_path else t_name
+                    cnt = len([f for f in read_list if f.startswith(pre)])
+                    if input(f"⚠️ 删除文件夹【{t_name}】({cnt}文件)？y/n：").lower() == "y":
+                        read_list[:] = [f for f in read_list if not f.startswith(pre)]
+                        log("✅ 文件夹已删除")
+            else:
+                log("❌ 无效序号")
+            continue
+
+        if choice == "c":
+            if input("⚠️ 确认清空全部？y/n：").lower() == "y":
+                read_list.clear()
+                nav_stack = [""]
+                log("✅ 已清空")
+            continue
+
+        # s=扫描 r=切换根目录
+        if choice == "s":
+            scan_available_files()
+            continue
+        if choice == "r":
+            change_root_dir()
+            continue
+
+        log("❌ 无效指令")
+
+# 流程控制
 if not is_debugging:
     homepage()
